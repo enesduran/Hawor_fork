@@ -72,6 +72,8 @@ def hawor_motion_estimation(args, start_idx, end_idx, seq_folder):
 
     print(f'Running hawor on {video} ...')
 
+    
+
     left_trk = []
     right_trk = []
     for k, idx in enumerate(tid):
@@ -99,6 +101,7 @@ def hawor_motion_estimation(args, start_idx, end_idx, seq_folder):
 
     bin_size = 128
     max_faces_per_bin = 20000
+
     renderer = Renderer(img.shape[1], img.shape[0], img_focal, 'cuda', 
                     bin_size=bin_size, max_faces_per_bin=max_faces_per_bin)
     # get faces

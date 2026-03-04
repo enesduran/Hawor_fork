@@ -1,7 +1,7 @@
 import argparse
 import sys
 import os
-
+import subprocess
 import torch
 sys.path.insert(0, os.path.dirname(__file__))
 import numpy as np
@@ -14,35 +14,68 @@ from lib.eval_utils.custom_utils import load_slam_cam
 from lib.vis.run_vis2 import run_vis2_on_video, run_vis2_on_video_cam
 
 
+
+
 if __name__ == '__main__':
+ 
     parser = argparse.ArgumentParser()
     parser.add_argument("--img_focal", type=float)
-    parser.add_argument("--video_path", type=str, default='example/segment_018.mp4')
+    parser.add_argument("--video_path", type=str, default='example/video_0.mp4')
     parser.add_argument("--input_type", type=str, default='file')
     parser.add_argument("--checkpoint",  type=str, default='./weights/hawor/checkpoints/hawor.ckpt')
     parser.add_argument("--infiller_weight",  type=str, default='./weights/hawor/checkpoints/infiller.pt')
-    parser.add_argument("--vis_mode",  type=str, default='cam', help='cam | world')
+    parser.add_argument("--vis_mode",  type=str, default='world', help='cam | world')
     args = parser.parse_args()
+ 
+    # run singularity foundation pose for better global motion estimation
+    
+    # result = subprocess.run(
+    # ["/usr/bin/singularity", "exec", "--nv", "foundationpose.sif", "python", "/home/ponsmoll/pba921/codes/FoundationPose/run_demo.py"],
+    # capture_output=True,
+    # text=True)
 
+ 
+
+
+
+ 
     start_idx, end_idx, seq_folder, imgfiles = detect_track_video(args)
 
     frame_chunks_all, img_focal = hawor_motion_estimation(args, start_idx, end_idx, seq_folder)
 
     slam_path = os.path.join(seq_folder, f"SLAM/hawor_slam_w_scale_{start_idx}_{end_idx}.npz")
 
-
     if not os.path.exists(slam_path):
         hawor_slam(args, start_idx, end_idx)
     slam_path = os.path.join(seq_folder, f"SLAM/hawor_slam_w_scale_{start_idx}_{end_idx}.npz")
+    
+    
     R_w2c_sla_all, t_w2c_sla_all, R_c2w_sla_all, t_c2w_sla_all = load_slam_cam(slam_path)
 
     pred_trans, pred_rot, pred_hand_pose, pred_betas, pred_valid = hawor_infiller(args, start_idx, end_idx, frame_chunks_all)
 
+    # save the results for visualization
+    save_pth = os.path.join(seq_folder, f"results_{start_idx}_{end_idx}.pkl")
+
+    joblib.dump({
+        'pred_trans_rh': pred_trans[1],
+        'pred_rot_rh': pred_rot[1],
+        'pred_hand_pose_rh': pred_hand_pose[1],
+        'pred_betas_rh': pred_betas[1],
+        'pred_valid_rh': pred_valid[1],
+        'pred_trans_lh': pred_trans[0],
+        'pred_rot_lh': pred_rot[0],
+        'pred_hand_pose_lh': pred_hand_pose[0] ,
+        'pred_betas_lh': pred_betas[0],
+        'pred_valid_lh': pred_valid[0],
+        'R_w2c_sla_all': R_w2c_sla_all.cpu(),
+        't_w2c_sla_all': t_w2c_sla_all.cpu(),
+        'R_c2w_sla_all': R_c2w_sla_all.cpu(),
+        't_c2w_sla_all': t_c2w_sla_all.cpu(),
+    }, save_pth)
+
     # vis sequence for this video
-    hand2idx = {
-        "right": 1,
-        "left": 0
-    }
+    hand2idx = {"right": 1, "left": 0}
     vis_start = 0
     vis_end = pred_trans.shape[1] - 1
             
@@ -102,28 +135,26 @@ if __name__ == '__main__':
             os.makedirs(output_pth)
         image_names = imgfiles[vis_start:vis_end]
         print(f"vis {vis_start} to {vis_end}")
-        run_vis2_on_video(left_dict, right_dict, output_pth, img_focal, image_names, R_c2w=R_c2w_sla_all[vis_start:vis_end], t_c2w=t_c2w_sla_all[vis_start:vis_end], interactive=False)
+        run_vis2_on_video(left_dict, right_dict, output_pth, img_focal, image_names, R_c2w=R_c2w_sla_all[vis_start:vis_end], t_c2w=t_c2w_sla_all[vis_start:vis_end], 
+                          interactive=False)
     elif args.vis_mode == 'cam':
         output_pth = os.path.join(seq_folder, f"vis_{vis_start}_{vis_end}")
         if not os.path.exists(output_pth):
             os.makedirs(output_pth)
         image_names = imgfiles[vis_start:vis_end]
         print(f"vis {vis_start} to {vis_end}")
-        run_vis2_on_video_cam(left_dict, right_dict, output_pth, img_focal, image_names, R_w2c=R_w2c_sla_all[vis_start:vis_end], t_w2c=t_w2c_sla_all[vis_start:vis_end])
+
+
+        run_vis2_on_video_cam(left_dict, right_dict, output_pth, img_focal, image_names, R_w2c=R_w2c_sla_all[vis_start:vis_end], t_w2c=t_w2c_sla_all[vis_start:vis_end], 
+                               interactive=False)
 
     print("finish")
+
 
     video_pth = os.path.join(output_pth, "aitviewer/video_0.mp4")
     final_video_pth = os.path.join(output_pth, "aitviewer/final_vis.mp4")
   
     # concatenate with the original video side by side
-    os.system(f"ffmpeg -i '{args.video_path}' -i '{video_pth}' -filter_complex hstack '{final_video_pth}'")
+    os.system(f"ffmpeg -y -i '{args.video_path}' -i '{video_pth}' -filter_complex hstack '{final_video_pth}'")
 
-
-
-# TMPDIR=/tmp/$USER singularity shell --nv hawor.sif
-
-# /home/ponsmoll/pba921/.conda/envs/hawor/lib/python3.10/site-packages/lightning_fabric/__init__.py:41:
-#  pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. 
-# The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this packa
-# ge or pin to Setuptools<81.   
+    
