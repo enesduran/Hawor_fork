@@ -2,6 +2,9 @@ import argparse
 import sys
 import os
 
+if os.environ.get('DISPLAY', '') == '' and os.environ.get('QT_QPA_PLATFORM') is None:
+    os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+
 import torch
 sys.path.insert(0, os.path.dirname(__file__))
 import numpy as np
@@ -17,7 +20,7 @@ from lib.vis.run_vis2 import run_vis2_on_video, run_vis2_on_video_cam
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--img_focal", type=float)
-    parser.add_argument("--video_path", type=str, default='example/segment_018.mp4')
+    parser.add_argument("--video_path", type=str, default='example/segment_037.mp4')
     parser.add_argument("--input_type", type=str, default='file')
     parser.add_argument("--checkpoint",  type=str, default='./weights/hawor/checkpoints/hawor.ckpt')
     parser.add_argument("--infiller_weight",  type=str, default='./weights/hawor/checkpoints/infiller.pt')
@@ -109,7 +112,7 @@ if __name__ == '__main__':
             os.makedirs(output_pth)
         image_names = imgfiles[vis_start:vis_end]
         print(f"vis {vis_start} to {vis_end}")
-        run_vis2_on_video_cam(left_dict, right_dict, output_pth, img_focal, image_names, R_w2c=R_w2c_sla_all[vis_start:vis_end], t_w2c=t_w2c_sla_all[vis_start:vis_end])
+        run_vis2_on_video_cam(left_dict, right_dict, output_pth, img_focal, image_names, R_w2c=R_w2c_sla_all[vis_start:vis_end], t_w2c=t_w2c_sla_all[vis_start:vis_end], interactive=False)
 
     print("finish")
 

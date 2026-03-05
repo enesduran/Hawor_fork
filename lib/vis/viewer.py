@@ -87,7 +87,28 @@ class ARCTICViewer:
         size=(2024, 2024),
     ):
         if not interactive:
-            v = HeadlessRenderer()
+            # NOTE: aitviewer HeadlessRenderer in this environment does not pass
+            # backend kwargs down to moderngl-window, so we override glcontext's
+            # default backend to EGL before creating the renderer.
+            headless_backend = os.environ.get("AITVIEWER_GL_BACKEND", "egl").lower()
+            if headless_backend != "egl":
+                logger.warning(f"Unsupported AITVIEWER_GL_BACKEND={headless_backend}, falling back to egl")
+                headless_backend = "egl"
+            try:
+                import glcontext
+
+                glcontext.default_backend = lambda: glcontext.get_backend_by_name(headless_backend)
+                logger.info(f"Using headless OpenGL backend={headless_backend}")
+            except Exception as exc:
+                logger.warning(f"Failed to set glcontext backend={headless_backend}: {exc}")
+
+            try:
+                v = HeadlessRenderer(size=size)
+            except Exception as exc:
+                raise RuntimeError(
+                    "Failed to initialize headless OpenGL context with EGL. "
+                    "Please run inside an EGL-enabled environment/container."
+                ) from exc
         else:
             v = Viewer(size=size)
 

@@ -4,6 +4,11 @@
 /weights
 /app_pytorch3d*
 
+
+_DATA
+example
+
+
 .vscode/
 **/.DS_Store
 data/pretrain/*.pth
