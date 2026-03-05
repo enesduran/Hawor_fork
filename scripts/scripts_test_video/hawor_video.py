@@ -21,6 +21,7 @@ from hawor.utils.rotation import angle_axis_to_rotation_matrix, rotation_matrix_
 from infiller.lib.model.network import TransformerModel
 
 def load_hawor(checkpoint_path):
+
     from pathlib import Path
     from hawor.configs import get_config
     model_cfg = str(Path(checkpoint_path).parent.parent / 'model_config.yaml')

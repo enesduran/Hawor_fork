@@ -34,5 +34,6 @@ loguru
 dill
 lapx
 ipdb
+ffmpeg
 chumpy@git+https://github.com/mattloper/chumpy
 moderngl-window==2.4.6

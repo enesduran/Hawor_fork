@@ -35,7 +35,7 @@ def detect_track_video(args):
     os.makedirs(seq_folder, exist_ok=True)
     os.makedirs(img_folder, exist_ok=True)
     print(f'Running detect_track on {file} ...')
-
+  
     ##### Extract Frames #####
     imgfiles = natsorted(glob(f'{img_folder}/*.jpg'))
     # print(imgfiles[:10])
