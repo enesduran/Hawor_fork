@@ -45,10 +45,8 @@ def hawor_motion_estimation(args, start_idx, end_idx, seq_folder):
     model = model.to(device)
     model.eval()
 
-    file = args.video_path
-    video_root = os.path.dirname(file)
-    video = os.path.basename(file).split('.')[0]
-    img_folder = f"{video_root}/{video}/extracted_images"
+    video = os.path.basename(seq_folder)
+    img_folder = os.path.join(seq_folder, 'extracted_images')
     imgfiles = np.array(natsorted(glob(f'{img_folder}/*.jpg')))
 
     tracks = np.load(f'{seq_folder}/tracks_{start_idx}_{end_idx}/model_tracks.npy', allow_pickle=True).item()
@@ -96,8 +94,11 @@ def hawor_motion_estimation(args, start_idx, end_idx, seq_folder):
     tid = [0, 1]
 
     img = cv2.imread(imgfiles[0])
-    img_center = [img.shape[1] / 2, img.shape[0] / 2]# w/2, h/2  
     H, W = img.shape[:2]
+    cx = getattr(args, 'img_cx', None)
+    cy = getattr(args, 'img_cy', None)
+    img_center = [cx if cx is not None else W / 2,
+                  cy if cy is not None else H / 2]  # w/2, h/2
     model_masks = np.zeros((len(imgfiles), H, W))
 
     bin_size = 128
@@ -223,7 +224,7 @@ def hawor_motion_estimation(args, start_idx, end_idx, seq_folder):
     joblib.dump(frame_chunks_all, f'{seq_folder}/tracks_{start_idx}_{end_idx}/frame_chunks_all.npy')
     return frame_chunks_all, img_focal
 
-def hawor_infiller(args, start_idx, end_idx, frame_chunks_all):
+def hawor_infiller(args, start_idx, end_idx, frame_chunks_all, seq_folder):
     # load infiller
     weight_path = args.infiller_weight
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -240,11 +241,7 @@ def hawor_infiller(args, start_idx, end_idx, frame_chunks_all):
     filling_model.load_state_dict(ckpt['transformer_encoder_state_dict'])
     filling_model.eval()
 
-    file = args.video_path
-    video_root = os.path.dirname(file)
-    video = os.path.basename(file).split('.')[0]
-    seq_folder = os.path.join(video_root, video)
-    img_folder = f"{video_root}/{video}/extracted_images"
+    img_folder = os.path.join(seq_folder, 'extracted_images')
 
     # Previous steps
     imgfiles = np.array(natsorted(glob(f'{img_folder}/*.jpg')))

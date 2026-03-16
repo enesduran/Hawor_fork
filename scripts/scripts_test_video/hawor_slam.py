@@ -1,24 +1,25 @@
-import math
-import sys
 import os
-
+import sys
+import cv2
+import math
+import torch
+import argparse
+import numpy as np
+from tqdm import tqdm
+from PIL import Image
+from glob import glob
+import imageio.v3 as iio
 from natsort import natsorted
 
 sys.path.insert(0, os.path.dirname(__file__) + '/../..')
 
-import argparse
-from tqdm import tqdm
-import numpy as np
-import torch
-import cv2
-from PIL import Image
-from glob import glob
+from lib.pipeline.est_scale import *
 from pycocotools import mask as masktool
 from lib.pipeline.masked_droid_slam import *
-from lib.pipeline.est_scale import *
 from hawor.utils.process import block_print, enable_print
 
 sys.path.insert(0, os.path.dirname(__file__) + '/../../thirdparty/Metric3D')
+
 from metric import Metric3D
 
 
@@ -43,14 +44,10 @@ def split_list_by_interval(lst, interval=1000):
     
     return start_indices, end_indices, split_lists
 
-def hawor_slam(args, start_idx, end_idx):
+def hawor_slam(args, start_idx, end_idx, seq_folder):
     # File and folders
-    file = args.video_path
-    video_root = os.path.dirname(file)
-    video = os.path.basename(file).split('.')[0]
-    seq_folder = os.path.join(video_root, video)
     os.makedirs(seq_folder, exist_ok=True)
-    video_folder = os.path.join(video_root, video)
+    video_folder = seq_folder
 
     img_folder = f'{video_folder}/extracted_images'
     imgfiles = natsorted(glob(f'{img_folder}/*.jpg'))
@@ -80,8 +77,14 @@ def hawor_slam(args, start_idx, end_idx):
             with open(os.path.join(video_folder, 'est_focal.txt'), 'w') as file:
                 file.write(str(focal))
     calib = np.array(est_calib(imgfiles)) # [focal, focal, cx, cy]
-    center = calib[2:]        
+    cx = getattr(args, 'img_cx', None)
+    cy = getattr(args, 'img_cy', None)
+    if cx is not None and cy is not None:
+        calib[2], calib[3] = cx, cy
+    center = calib[2:]
     calib[:2] = focal
+
+    import ipdb; ipdb.set_trace()
     
     # Droid-slam with masking
     droid, traj = run_slam(imgfiles, masks=masks, calib=calib)
@@ -108,6 +111,8 @@ def hawor_slam(args, start_idx, end_idx):
         pred_depth = cv2.resize(pred_depth, (W, H))
         pred_depths.append(pred_depth)
 
+    pred_depths = np.stack(pred_depths, axis=0)
+
     ##### Estimate Metric Scale #####
     print('Estimating Metric Scale ...')
     scales_ = []
@@ -126,6 +131,17 @@ def hawor_slam(args, start_idx, end_idx):
             max_threshold += 0.1
             scale = est_scale_hybrid(slam_depth, pred_depth, sigma=0.5, msk=msk, near_thresh=min_threshold, far_thresh=max_threshold)                    
         scales_.append(scale)
+
+  
+    
+
+    #  normalize for visualization
+    # pred_depths_vis = (pred_depths - pred_depths.min()) / (pred_depths.max() - pred_depths.min()) * 255 
+
+    # iio.imwrite(f"deneme.mp4",
+    #         pred_depths_vis.astype(np.uint8), 
+    #         fps=30, codec="libx264", quality=8,
+    #         macro_block_size=1)
 
     median_s = np.median(scales_)
     print(f"estimated scale: {median_s}")
