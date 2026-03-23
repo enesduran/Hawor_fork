@@ -76,7 +76,8 @@ def build_video_from_frames(frame_folder, output_video_path, fps=30):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--img_focal", type=float)
+    parser.add_argument("--img_focal", type=float, default=None,
+                        help='Camera focal length in pixels. If omitted, HAWOR estimates/loads it.')
     parser.add_argument("--img_cx", type=float, default=None,
                         help='Principal point x (pixels). If omitted, estimated from image centre.')
     parser.add_argument("--img_cy", type=float, default=None,
@@ -117,26 +118,24 @@ if __name__ == '__main__':
 
     # vis sequence for this video
     hand2idx = {"right": 1, "left": 0}
-    vis_start = 0
-    vis_end = pred_trans.shape[1] 
+    vis_start, vis_end = 0, pred_trans.shape[1] 
             
     # get faces
-    faces = get_mano_faces()
-    faces_new = np.array([[92, 38, 234],
-            [234, 38, 239],
-            [38, 122, 239],
-            [239, 122, 279],
-            [122, 118, 279],
-            [279, 118, 215],
-            [118, 117, 215],
-            [215, 117, 214],
-            [117, 119, 214],
-            [214, 119, 121],
-            [119, 120, 121],
-            [121, 120, 78],
-            [120, 108, 78],
-            [78, 108, 79]])
-    faces_right = np.concatenate([faces, faces_new], axis=0)
+    faces_right = np.concatenate([get_mano_faces(), 
+                                  np.array([[92, 38, 234],
+                                            [234, 38, 239],
+                                            [38, 122, 239],
+                                            [239, 122, 279],
+                                            [122, 118, 279],
+                                            [279, 118, 215],
+                                            [118, 117, 215],
+                                            [215, 117, 214],
+                                            [117, 119, 214],
+                                            [214, 119, 121],
+                                            [119, 120, 121],
+                                            [121, 120, 78],
+                                            [120, 108, 78],
+                                            [78, 108, 79]])], axis=0)
 
     # get right hand vertices
     hand = 'right'

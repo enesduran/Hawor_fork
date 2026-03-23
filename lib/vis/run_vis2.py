@@ -36,10 +36,13 @@ def camera_marker_geometry(radius, height):
     return vertices, faces, face_colors
 
 
-def run_vis2_on_video(res_dict, res_dict2, output_pth, focal_length, image_names, R_c2w=None, t_c2w=None, interactive=True):
+def run_vis2_on_video(res_dict, res_dict2, output_pth, focal_length, image_names, R_c2w=None, t_c2w=None, interactive=True, target_size=None):
     
-    img0 = cv2.imread(image_names[0])
-    height, width, _ = img0.shape
+    if target_size is not None:
+        width, height = target_size
+    else:
+        img0 = cv2.imread(image_names[0])
+        height, width, _ = img0.shape
 
     world_mano = {}
     world_mano['vertices'] = res_dict['vertices']
@@ -50,14 +53,12 @@ def run_vis2_on_video(res_dict, res_dict2, output_pth, focal_length, image_names
     world_mano2['faces'] = res_dict2['faces']
 
     vis_dict = {}
-    color_idx = 0
-    world_mano['vertices'] = world_mano['vertices']
+    color_idx = 0 
+
     for _id, _verts in enumerate(world_mano['vertices']):
-        verts = _verts.cpu().numpy() # T, N, 3
-        body_faces = world_mano['faces']
         body_meshes = {
-            "v3d": verts,
-            "f3d": body_faces,
+            "v3d": _verts.cpu().numpy(),
+            "f3d": world_mano['faces'],
             "vc": None,
             "name": f"hand_{_id}",
             # "color": "pace-green",
@@ -65,14 +66,11 @@ def run_vis2_on_video(res_dict, res_dict2, output_pth, focal_length, image_names
         }
         vis_dict[f"hand_{_id}"] = body_meshes
         color_idx += 1
-    
-    world_mano2['vertices'] = world_mano2['vertices']
+     
     for _id, _verts in enumerate(world_mano2['vertices']):
-        verts = _verts.cpu().numpy() # T, N, 3
-        body_faces = world_mano2['faces']
         body_meshes = {
-            "v3d": verts,
-            "f3d": body_faces,
+            "v3d": _verts.cpu().numpy(),
+            "f3d": world_mano2['faces'],
             "vc": None,
             "name": f"hand2_{_id}",
             # "color": "pace-blue",
@@ -142,10 +140,13 @@ def run_vis2_on_video(res_dict, res_dict2, output_pth, focal_length, image_names
         viewer.render_seq(batch, out_folder=os.path.join(output_pth, 'aitviewer'))
         return os.path.join(output_pth, 'aitviewer', "video_0.mp4")
 
-def run_vis2_on_video_cam(res_dict, res_dict2, output_pth, focal_length, image_names, R_w2c=None, t_w2c=None, interactive=True):
+def run_vis2_on_video_cam(res_dict, res_dict2, output_pth, focal_length, image_names, R_w2c=None, t_w2c=None, interactive=True, target_size=None):
     
-    img0 = cv2.imread(image_names[0])
-    height, width, _ = img0.shape
+    if target_size is not None:
+        width, height = target_size
+    else:
+        img0 = cv2.imread(image_names[0])
+        height, width, _ = img0.shape
 
     world_mano = {}
     world_mano['vertices'] = res_dict['vertices']
@@ -254,10 +255,8 @@ def normalize(x):
     return x / torch.linalg.norm(x, dim=-1, keepdim=True)
 
 def save_mesh_to_obj(vertices, faces, file_path):
-    # 创建一个 Trimesh 对象
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
     
-    # 导出为 .obj 文件
     mesh.export(file_path)
     print(f"Mesh saved to {file_path}")
 

@@ -51,7 +51,7 @@ def hawor_motion_estimation(args, start_idx, end_idx, seq_folder):
 
     tracks = np.load(f'{seq_folder}/tracks_{start_idx}_{end_idx}/model_tracks.npy', allow_pickle=True).item()
     img_focal = args.img_focal
-    if img_focal is None:
+    if img_focal is None or not np.isfinite(img_focal):
         try:
             with open(os.path.join(seq_folder, 'est_focal.txt'), 'r') as file:
                 img_focal = file.read()
@@ -97,8 +97,11 @@ def hawor_motion_estimation(args, start_idx, end_idx, seq_folder):
     H, W = img.shape[:2]
     cx = getattr(args, 'img_cx', None)
     cy = getattr(args, 'img_cy', None)
-    img_center = [cx if cx is not None else W / 2,
-                  cy if cy is not None else H / 2]  # w/2, h/2
+    if cx is None or not np.isfinite(cx):
+        cx = W / 2
+    if cy is None or not np.isfinite(cy):
+        cy = H / 2
+    img_center = [float(cx), float(cy)]  # principal point in pixels
     model_masks = np.zeros((len(imgfiles), H, W))
 
     bin_size = 128

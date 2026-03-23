@@ -134,21 +134,28 @@ def detect_track_video(args):
 
     start_idx = 0
     end_idx = len(imgfiles)
-
-    if os.path.exists(f'{seq_folder}/tracks_{start_idx}_{end_idx}/model_boxes.npy'):
-        print(f"skip track for {start_idx}_{end_idx}")
-        return start_idx, end_idx, seq_folder, imgfiles
-    os.makedirs(f"{seq_folder}/tracks_{start_idx}_{end_idx}", exist_ok=True)
+    track_dir = f'{seq_folder}/tracks_{start_idx}_{end_idx}'
+    model_boxes_path = f'{track_dir}/model_boxes.npy'
+    model_tracks_path = f'{track_dir}/model_tracks.npy'
 
     gt_bboxes_path = getattr(args, 'gt_bboxes', None)
     if gt_bboxes_path is not None and os.path.isfile(gt_bboxes_path):
         print(f'Using GT bounding boxes from {gt_bboxes_path}')
+        os.makedirs(track_dir, exist_ok=True)
         boxes_, tracks_ = build_tracks_from_gt_bboxes(gt_bboxes_path, len(imgfiles))
-    else:
-        boxes_, tracks_ = detect_track(imgfiles, thresh=0.2)
+        np.save(model_boxes_path, boxes_)
+        np.save(model_tracks_path, tracks_)
+        return start_idx, end_idx, seq_folder, imgfiles
 
-    np.save(f'{seq_folder}/tracks_{start_idx}_{end_idx}/model_boxes.npy', boxes_)
-    np.save(f'{seq_folder}/tracks_{start_idx}_{end_idx}/model_tracks.npy', tracks_)
+    if os.path.exists(model_boxes_path) and os.path.exists(model_tracks_path):
+        print(f"skip track for {start_idx}_{end_idx}")
+        return start_idx, end_idx, seq_folder, imgfiles
+    os.makedirs(track_dir, exist_ok=True)
+
+    boxes_, tracks_ = detect_track(imgfiles, thresh=0.2)
+
+    np.save(model_boxes_path, boxes_)
+    np.save(model_tracks_path, tracks_)
 
     return start_idx, end_idx, seq_folder, imgfiles
 
