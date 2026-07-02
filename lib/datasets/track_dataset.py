@@ -49,9 +49,9 @@ class TrackDatasetEval(Dataset):
         img_center = self.img_center
 
         img = cv2.imread(imgfile)[:,:,::-1]
+        img_width = img.shape[1]
         if self.do_flip:
             img = img[:, ::-1, :]
-            img_width = img.shape[1]
             center[0] = img_width - center[0] - 1
         img_crop = crop(img, center, scale, 
                         [self.crop_size, self.crop_size], 
@@ -65,13 +65,13 @@ class TrackDatasetEval(Dataset):
         item['img'] = img_crop
         
         if self.do_flip:
-            # center[0] = img_width - center[0] - 1 
             item['do_flip'] = torch.tensor(1).float()
         item['img_idx'] = torch.tensor(index).long()
         item['scale'] = torch.tensor(scale).float()
         item['center'] = torch.tensor(center).float()
         item['img_focal'] = torch.tensor(img_focal).float()
         item['img_center'] = torch.tensor(img_center).float()
+        item['img_width'] = torch.tensor(img_width).float()
         
 
         return item

@@ -194,7 +194,12 @@ class HAWOR(pl.LightningModule):
         out = {}
         if 'do_flip' in batch:
             pred_cam[..., 1] *= -1
-            center[..., 0] = img_center[..., 0]*2 - center[..., 0] - 1 
+            # Un-flip the crop center about the image WIDTH, matching how the
+            # dataset flipped it (track_dataset: center[0] = img_width - center[0]
+            # - 1). Mirroring about the principal point img_center instead adds a
+            # constant 2*img_cx - img_width lateral bias to the left (flipped) hand.
+            img_width = batch['img_width'].flatten(0, 1)
+            center[..., 0] = img_width - center[..., 0] - 1
         out['pred_cam'] = pred_cam
         out['pred_pose'] = pred_pose
         out['pred_shape'] = pred_shape
