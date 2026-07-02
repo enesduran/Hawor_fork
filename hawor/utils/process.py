@@ -178,8 +178,8 @@ def run_mano_left(trans, root_orient, hand_pose, is_right=None, betas=None, use_
         # outputs["joints"][..., 0] = (2*is_right-1)*outputs["joints"][..., 0]
         is_right = (is_right[:, :, 0].cpu().numpy() > 0)
         faces_result = np.zeros((B, T, faces_n, 3))
-        faces_right_expanded = np.expand_dims(np.expand_dims(faces_right, axis=0), axis=0) 
-        faces_left_expanded = np.expand_dims(np.expand_dims(faces_left, axis=0), axis=0) 
+        faces_right_expanded = np.expand_dims(np.expand_dims(faces_right, axis=0), axis=0)
+        faces_left_expanded = np.expand_dims(np.expand_dims(faces_left, axis=0), axis=0)
         faces_result = np.where(is_right[..., np.newaxis, np.newaxis], faces_right_expanded, faces_left_expanded)
         outputs["faces"] = torch.from_numpy(faces_result.astype(np.int32))
 

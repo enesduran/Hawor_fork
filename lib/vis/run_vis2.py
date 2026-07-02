@@ -36,14 +36,15 @@ def camera_marker_geometry(radius, height):
     return vertices, faces, face_colors
 
 
-def run_vis2_on_video(res_dict, res_dict2, output_pth, focal_length, image_names, R_c2w=None, t_c2w=None, interactive=True, target_size=None):
+def run_vis2_on_video(res_dict, res_dict2, output_pth, K, image_names, R_c2w=None, t_c2w=None, interactive=True, target_size=None):
     
     if target_size is not None:
         width, height = target_size
     else:
         img0 = cv2.imread(image_names[0])
         height, width, _ = img0.shape
-
+        
+ 
     world_mano = {}
     world_mano['vertices'] = res_dict['vertices']
     world_mano['faces'] = res_dict['faces']
@@ -61,7 +62,6 @@ def run_vis2_on_video(res_dict, res_dict2, output_pth, focal_length, image_names
             "f3d": world_mano['faces'],
             "vc": None,
             "name": f"hand_{_id}",
-            # "color": "pace-green",
             "color": "director-purple",
         }
         vis_dict[f"hand_{_id}"] = body_meshes
@@ -73,7 +73,6 @@ def run_vis2_on_video(res_dict, res_dict2, output_pth, focal_length, image_names
             "f3d": world_mano2['faces'],
             "vc": None,
             "name": f"hand2_{_id}",
-            # "color": "pace-blue",
             "color": "director-blue",
         }
         vis_dict[f"hand2_{_id}"] = body_meshes
@@ -98,14 +97,14 @@ def run_vis2_on_video(res_dict, res_dict2, output_pth, focal_length, image_names
 
     verts, faces, face_colors = camera_marker_geometry(0.05, 0.1)
     verts = np.einsum("tij,nj->tni", Rt[:, :3, :3], verts) + Rt[:, None, :3, 3]
+    
     camera_meshes = {
         "v3d": verts,
         "f3d": faces,
         "vc": None,
         "name": "camera",
         "fc": face_colors,
-        "color": -1,
-    }
+        "color": -1}
     vis_dict["camera"] = camera_meshes
 
     side_source = torch.tensor([0.463, -0.478, 2.456])
@@ -114,33 +113,27 @@ def run_vis2_on_video(res_dict, res_dict2, output_pth, focal_length, image_names
     view_camera = lookat_matrix(side_source, side_target, up)
     viewer_Rt = np.tile(view_camera[:3, :4], (num_frames, 1, 1))
 
-    meshes = viewer_utils.construct_viewer_meshes(
-        vis_dict, draw_edges=False, flat_shading=False
-    )
+    meshes = viewer_utils.construct_viewer_meshes(vis_dict, 
+                                                  draw_edges=False,
+                                                  flat_shading=False)
 
     vis_h, vis_w = (height, width)
-    K = np.array(
-        [
-            [1000, 0, vis_w / 2],
-            [0, 1000, vis_h / 2],
-            [0, 0, 1]
-        ]
-    )
-    
+    K = np.asarray(K, dtype=np.float64)
+
     data = viewer_utils.ViewerData(viewer_Rt, K, vis_w, vis_h)
     batch = (meshes, data)
 
     if interactive:
         viewer = viewer_utils.ARCTICViewer(interactive=True, size=(vis_w, vis_h))
-        viewer.render_seq(batch, out_folder=os.path.join(output_pth, 'aitviewer'))
+        viewer.render_seq(batch, out_folder=output_pth)
     else:
         viewer = viewer_utils.ARCTICViewer(interactive=False, size=(vis_w, vis_h), render_types=['video'])
-        if os.path.exists(os.path.join(output_pth, 'aitviewer', "video_0.mp4")):
-            os.remove(os.path.join(output_pth, 'aitviewer', "video_0.mp4"))
-        viewer.render_seq(batch, out_folder=os.path.join(output_pth, 'aitviewer'))
-        return os.path.join(output_pth, 'aitviewer', "video_0.mp4")
+        if os.path.exists(os.path.join(output_pth, "video_0.mp4")):
+            os.remove(os.path.join(output_pth, "video_0.mp4"))
+        viewer.render_seq(batch, out_folder=output_pth)
+        return os.path.join(output_pth, "video_0.mp4")
 
-def run_vis2_on_video_cam(res_dict, res_dict2, output_pth, focal_length, image_names, R_w2c=None, t_w2c=None, interactive=True, target_size=None):
+def run_vis2_on_video_cam(res_dict, res_dict2, output_pth, K, image_names, R_w2c=None, t_w2c=None, interactive=True, target_size=None):
     
     if target_size is not None:
         width, height = target_size
@@ -167,7 +160,6 @@ def run_vis2_on_video_cam(res_dict, res_dict2, output_pth, focal_length, image_n
             "f3d": body_faces,
             "vc": None,
             "name": f"hand_{_id}",
-            # "color": "pace-green",
             "color": "director-purple",
         }
         vis_dict[f"hand_{_id}"] = body_meshes
@@ -182,9 +174,8 @@ def run_vis2_on_video_cam(res_dict, res_dict2, output_pth, focal_length, image_n
             "f3d": body_faces,
             "vc": None,
             "name": f"hand2_{_id}",
-            # "color": "pace-blue",
-            "color": "director-blue",
-        }
+            "color": "director-blue"}
+        
         vis_dict[f"hand2_{_id}"] = body_meshes
         color_idx += 1
 
@@ -198,13 +189,7 @@ def run_vis2_on_video_cam(res_dict, res_dict2, output_pth, focal_length, image_n
     Rt[:, :3, 3] = t_w2c[:num_frames]
 
     cols, rows = (width, height)
-    K = np.array(
-        [
-            [focal_length, 0, width / 2],
-            [0, focal_length, height / 2],
-            [0, 0, 1]
-        ]
-    )
+    K = np.asarray(K, dtype=np.float64)
     vis_h = height
     vis_w = width
 
@@ -213,12 +198,12 @@ def run_vis2_on_video_cam(res_dict, res_dict2, output_pth, focal_length, image_n
 
     if interactive:
         viewer = viewer_utils.ARCTICViewer(interactive=True, size=(vis_w, vis_h))
-        viewer.render_seq(batch, out_folder=os.path.join(output_pth, 'aitviewer'))
+        viewer.render_seq(batch, out_folder=output_pth)
     else:
         viewer = viewer_utils.ARCTICViewer(interactive=False, size=(vis_w, vis_h), render_types=['video'])
-        if os.path.exists(os.path.join(output_pth, 'aitviewer', "video_0.mp4")):
-            os.remove(os.path.join(output_pth, 'aitviewer', "video_0.mp4"))
-        viewer.render_seq(batch, out_folder=os.path.join(output_pth, 'aitviewer'))
+        if os.path.exists(os.path.join(output_pth, "video_0.mp4")):
+            os.remove(os.path.join(output_pth, "video_0.mp4"))
+        viewer.render_seq(batch, out_folder=output_pth)
 
 def lookat_matrix(source_pos, target_pos, up):
     """
