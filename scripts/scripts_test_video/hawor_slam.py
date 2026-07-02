@@ -83,9 +83,7 @@ def hawor_slam(args, start_idx, end_idx, seq_folder):
         calib[2], calib[3] = cx, cy
     center = calib[2:]
     calib[:2] = focal
-
-    import ipdb; ipdb.set_trace()
-    
+ 
     # Droid-slam with masking
     droid, traj = run_slam(imgfiles, masks=masks, calib=calib)
     n = droid.video.counter.value

@@ -85,7 +85,9 @@ class ARCTICViewer:
         render_types=["rgb", "depth", "mask"],
         interactive=True,
         size=(2024, 2024),
+        fps=30,
     ):
+        self.fps = fps
         if not interactive:
             # NOTE: aitviewer HeadlessRenderer in this environment does not pass
             # backend kwargs down to moderngl-window, so we override glcontext's
@@ -94,6 +96,29 @@ class ARCTICViewer:
             if headless_backend != "egl":
                 logger.warning(f"Unsupported AITVIEWER_GL_BACKEND={headless_backend}, falling back to egl")
                 headless_backend = "egl"
+            # On systems that ship both libOpenGL.so.0 (vendor-neutral) and
+            # libGL.so.1 (legacy), glcontext's EGL backend can end up with a
+            # libGL handle whose GL functions are unresolved against the EGL-
+            # bound context, producing a context that reports version 0 and
+            # ValueError("Requested OpenGL version 450, got version 0").
+            # Pinning GLCONTEXT_LINUX_LIBGL=libGL.so.1 forces the path that
+            # exposes a working GL dispatch under EGL on NVIDIA drivers.
+            os.environ.setdefault("GLCONTEXT_LINUX_LIBGL", "libGL.so.1")
+            # Conda envs ship libglvnd's libEGL.so.1 but not libEGL_nvidia.so.0.
+            # libEGL.so.1 reads /usr/share/glvnd/egl_vendor.d/10_nvidia.json
+            # which references libEGL_nvidia.so.0 by name; if it lives under a
+            # system path that isn't on LD_LIBRARY_PATH, the EGL context comes
+            # back as version 0. Locate the NVIDIA backend on standard system
+            # paths and prepend its directory so dlopen() can resolve it.
+            _nvidia_egl_search = ["/usr/lib64", "/usr/lib/x86_64-linux-gnu"]
+            for _p in _nvidia_egl_search:
+                if op.exists(op.join(_p, "libEGL_nvidia.so.0")):
+                    _ld = os.environ.get("LD_LIBRARY_PATH", "")
+                    if _p not in _ld.split(os.pathsep):
+                        os.environ["LD_LIBRARY_PATH"] = (
+                            _p + (os.pathsep + _ld if _ld else "")
+                        )
+                    break
             try:
                 import glcontext
 
@@ -123,13 +148,26 @@ class ARCTICViewer:
     def view_fn_headless(self, num_iter, out_folder):
         v = self.v
 
-        v._init_scene()
+        # _init_scene calls Scene.make_renderable on every node, which dumps a
+        # lot of aitviewer print() chatter ("camera config does not exist",
+        # lines.py shape spam, etc.). None of it is actionable for headless
+        # batch renders, so redirect stdout/stderr at the fd level for the
+        # duration of the call only.
+        with open(os.devnull, "w") as _devnull:
+            _o, _e = os.dup(1), os.dup(2)
+            try:
+                os.dup2(_devnull.fileno(), 1)
+                os.dup2(_devnull.fileno(), 2)
+                v._init_scene()
+            finally:
+                os.dup2(_o, 1); os.close(_o)
+                os.dup2(_e, 2); os.close(_e)
 
-        logger.info("Rendering to video")
+ 
         if "video" in self.render_types:
             vid_p = op.join(out_folder, "video.mp4")
-            v.save_video(video_dir=vid_p)
-            return 
+            v.save_video(video_dir=vid_p, output_fps=int(v.playback_fps))
+            return
 
         pbar = tqdm(range(num_iter))
         for fidx in pbar:
@@ -162,6 +200,7 @@ class ARCTICViewer:
         assert isinstance(data, ViewerData)
 
     def render_seq(self, batch, out_folder="./render_out", floor_y=0):
+         
         meshes_all, data = batch
         self.setup_viewer(data, floor_y)
         for mesh in meshes_all.values():
@@ -169,16 +208,16 @@ class ARCTICViewer:
         if self.interactive:
             self.view_interactive()
         else:
-            num_iter = data["num_frames"]
+            num_iter = data["num_frames"]      
             self.view_fn_headless(num_iter, out_folder)
 
     def setup_viewer(self, data, floor_y):
         v = self.v
-        fps = 30
+        fps = self.fps
+
         if "imgnames" in data:
             setup_billboard(data, v)
 
-        # camera.show_path()
         v.run_animations = True  # autoplay
         v.run_animations = False  # autoplay
         v.playback_fps = fps
@@ -186,7 +225,6 @@ class ARCTICViewer:
         v.scene.origin.enabled = False
         v.scene.floor.enabled = False
         v.auto_set_floor = False
-        # v.scene.camera.position = np.array((0.0, 0.0, 0))
         self.v = v
 
 
@@ -213,7 +251,6 @@ def small_exp_map(_dist):
 
 
 def construct_viewer_meshes(data, draw_edges=False, flat_shading=True):
-    rotation_flip = aa2rot_numpy(np.array([1, 0, 0]) * np.pi)
     meshes = {}
     for key, val in data.items():
         if 'single' in key:
@@ -240,61 +277,10 @@ def construct_viewer_meshes(data, draw_edges=False, flat_shading=True):
             flat_shading=flat_shading,
             draw_edges=draw_edges,
             material=mesh_material,
-            # rotation=rotation_flip,
         )
     return meshes
 
-
-def setup_viewer(
-    v, shared_folder_p, video, images_path, data, flag, seq_name, side_angle
-):
-    fps = 10
-    cols, rows = 224, 224
-    focal = 1000.0
-
-    # setup image paths
-    regex = re.compile(r"(\d*)$")
-
-    def sort_key(x):
-        name = os.path.splitext(x)[0]
-        return int(regex.search(name).group(0))
-
-    # setup billboard
-    images_path = op.join(shared_folder_p, "images")
-    images_paths = [
-        os.path.join(images_path, f)
-        for f in sorted(os.listdir(images_path), key=sort_key)
-    ]
-    assert len(images_paths) > 0
-
-    cam_t = data[f"{flag}.object.cam_t"]
-    num_frames = min(cam_t.shape[0], len(images_paths))
-    cam_t = cam_t[:num_frames]
-    # setup camera
-    K = np.array([[focal, 0, rows / 2.0], [0, focal, cols / 2.0], [0, 0, 1]])
-    Rt = np.zeros((num_frames, 3, 4))
-    Rt[:, :, 3] = cam_t
-    Rt[:, :3, :3] = np.eye(3)
-    Rt[:, 1:3, :3] *= -1.0
-
-    camera = OpenCVCamera(K, Rt, cols, rows, viewer=v)
-    if side_angle is None:
-        billboard = Billboard.from_camera_and_distance(
-            camera, 10.0, cols, rows, images_paths
-        )
-        v.scene.add(billboard)
-    v.scene.add(camera)
-    v.run_animations = True  # autoplay
-    v.playback_fps = fps
-    v.scene.fps = fps
-    v.scene.origin.enabled = False
-    v.scene.floor.enabled = False
-    v.auto_set_floor = False
-    v.scene.floor.position[1] = -3
-    v.set_temp_camera(camera)
-    # v.scene.camera.position = np.array((0.0, 0.0, 0))
-    return v
-
+  
 
 def render_depth(v, depth_p):
     depth = np.array(v.get_depth()).astype(np.float16)
@@ -320,10 +306,10 @@ def setup_billboard(data, v):
     rows = data.rows
     cols = data.cols
     camera = OpenCVCamera(K, Rt, cols, rows, viewer=v)
+     
     if images_paths is not None:
         billboard = Billboard.from_camera_and_distance(
-            camera, 10.0, cols, rows, images_paths
-        )
+            camera, 10.0, cols, rows, images_paths)
         v.scene.add(billboard)
     v.scene.add(camera)
     v.scene.camera.load_cam()
