@@ -2,6 +2,7 @@ import gradio as gr
 # import spaces
 import sys
 import os
+import cv2
 import torch
 import numpy as np
 import joblib
@@ -99,14 +100,16 @@ def render_reconstruction(input_video, img_focal):
             os.makedirs(output_pth)
         image_names = imgfiles[vis_start:vis_end]
         print(f"vis {vis_start} to {vis_end}")
-        vis_video_path = run_vis2_on_video(left_dict, right_dict, output_pth, img_focal, image_names, R_c2w=R_c2w_sla_all[vis_start:vis_end], t_c2w=t_c2w_sla_all[vis_start:vis_end], interactive=False)
+        _h, _w, _ = cv2.imread(image_names[0]).shape
+        K = np.array([[img_focal, 0, _w / 2], [0, img_focal, _h / 2], [0, 0, 1]])
+        vis_video_path = run_vis2_on_video(left_dict, right_dict, output_pth, K, image_names, R_c2w=R_c2w_sla_all[vis_start:vis_end], t_c2w=t_c2w_sla_all[vis_start:vis_end], interactive=False)
     elif args.vis_mode == 'cam':
         # output_pth = os.path.join(seq_folder, f"vis_{vis_start}_{vis_end}")
         # if not os.path.exists(output_pth):
         #     os.makedirs(output_pth)
         # image_names = imgfiles[vis_start:vis_end]
         # print(f"vis {vis_start} to {vis_end}")
-        # run_vis2_on_video_cam(left_dict, right_dict, output_pth, img_focal, image_names, R_w2c=R_w2c_sla_all[vis_start:vis_end], t_w2c=t_w2c_sla_all[vis_start:vis_end])
+        # run_vis2_on_video_cam(left_dict, right_dict, output_pth, K, image_names, R_w2c=R_w2c_sla_all[vis_start:vis_end], t_w2c=t_w2c_sla_all[vis_start:vis_end])
         raise NotImplementedError
 
     return vis_video_path  
