@@ -97,6 +97,9 @@ if __name__ == '__main__':
     parser.add_argument("--static_camera", action="store_true",
                         help='Set when the camera is static (exocentric view). Skips SLAM and '
                              'uses identity camera pose for every frame.')
+    parser.add_argument("--skip_vis", action="store_true",
+                        help='Skip rendering the vis_* debug videos (world/camera space + '
+                             'ffmpeg concat); only run the pipeline and dump hand_dict.pkl.')
     parser.add_argument("--cam_traj", type=str, default=None,
                         help='Path to a .npy file of shape (N_video, 4, 4) holding GT '
                              'camera-to-world poses. When provided, DROID-SLAM is bypassed '
@@ -252,59 +255,74 @@ if __name__ == '__main__':
 
     _to_hot3d_dict(right_dict, pred_glob_r['joints'])
     _to_hot3d_dict(left_dict, pred_glob_l['joints'])
-    
-    output_pth = os.path.join(seq_folder, f"vis_{vis_start}_{vis_end}")
-    
-    if not os.path.exists(output_pth):
-        os.makedirs(output_pth)
-    image_names = imgfiles[vis_start:vis_end]
-    
-    cx = args.img_cx if args.img_cx is not None else input_width / 2
-    cy = args.img_cy if args.img_cy is not None else input_height / 2
-    K = np.array([[img_focal, 0, cx], [0, img_focal, cy], [0, 0, 1]])
-     
-    run_vis2_on_video(left_dict, right_dict, output_pth, K, image_names, 
-                        R_c2w=R_c2w_sla_all[vis_start:vis_end], 
-                        t_c2w=t_c2w_sla_all[vis_start:vis_end], 
-                        interactive=False, 
-                        target_size=(input_width, input_height))
- 
-    produced_video_path = os.path.join(output_pth, "video_0.mp4")
-    target_video_path = os.path.join(output_pth, "world_space.mp4")
-    if os.path.exists(produced_video_path):
-        os.rename(produced_video_path, target_video_path)
 
+    # Hide invalid (extrapolated) frames in the debug videos below as well:
+    # shift those frames' vertices ~1 km away so they render sub-pixel.
+    # NaN would poison aitviewer's buffers, so displacement is used here and
+    # the NaN masking for hand_dict.pkl happens after rendering.
+    valid_right = torch.from_numpy(pred_valid[1, vis_start:vis_end]).bool()
+    valid_left = torch.from_numpy(pred_valid[0, vis_start:vis_end]).bool()
+    # Demote frames with non-finite vertices: infiller windows that contain no
+    # both-hands-valid anchor frame get a fully-masked attention and emit NaN
+    # trans/betas, yet the fill loop still marks them valid.
+    valid_right &= torch.isfinite(right_dict['vertices'][0]).all(-1).all(-1)
+    valid_left &= torch.isfinite(left_dict['vertices'][0]).all(-1).all(-1)
+    right_dict['vertices'][0, ~valid_right] += 1e3
+    left_dict['vertices'][0, ~valid_left] += 1e3
+    
+    if not args.skip_vis:
+        output_pth = os.path.join(seq_folder, f"vis_{vis_start}_{vis_end}")
 
-    from aitviewer.shaders import clear_shader_cache
-    clear_shader_cache()
- 
-    run_vis2_on_video_cam(left_dict, right_dict, output_pth, K, image_names, 
-                            R_w2c=R_w2c_sla_all[vis_start:vis_end], 
-                            t_w2c=t_w2c_sla_all[vis_start:vis_end], 
-                            interactive=False, 
+        if not os.path.exists(output_pth):
+            os.makedirs(output_pth)
+        image_names = imgfiles[vis_start:vis_end]
+
+        cx = args.img_cx if args.img_cx is not None else input_width / 2
+        cy = args.img_cy if args.img_cy is not None else input_height / 2
+        K = np.array([[img_focal, 0, cx], [0, img_focal, cy], [0, 0, 1]])
+
+        run_vis2_on_video(left_dict, right_dict, output_pth, K, image_names,
+                            R_c2w=R_c2w_sla_all[vis_start:vis_end],
+                            t_c2w=t_c2w_sla_all[vis_start:vis_end],
+                            interactive=False,
                             target_size=(input_width, input_height))
-    
-    produced_video_path = os.path.join(output_pth, "video_0.mp4")
-    target_video_path = os.path.join(output_pth, "camera_space.mp4")
-    if os.path.exists(produced_video_path):
-        os.rename(produced_video_path, target_video_path)
- 
-    ensure_video_resolution(target_video_path, input_width, input_height)
-    final_video_pth = os.path.join(output_pth, "final_vis.mp4")
 
-    orig_video_for_concat = args.video_path
-    if os.path.isdir(args.video_path):
-        orig_video_for_concat = os.path.join(seq_folder, "input_from_frames.mp4")
-        if not os.path.exists(orig_video_for_concat):
-            build_video_from_frames(os.path.join(seq_folder, "extracted_images"), orig_video_for_concat)
- 
-  
-    # concatenate with the original video side by side (match both stream resolutions)
-    os.system(f"ffmpeg -y -i '{orig_video_for_concat}' -i '{target_video_path}' "
-            f"-filter_complex \"[0:v]scale={input_width}:{input_height}:flags=lanczos,setsar=1[orig];"
-            f"[1:v]scale={input_width}:{input_height}:flags=lanczos,setsar=1[vis];"
-            f"[orig][vis]hstack=inputs=2[v]\" "
-            f"-map '[v]' '{final_video_pth}'")
+        produced_video_path = os.path.join(output_pth, "video_0.mp4")
+        target_video_path = os.path.join(output_pth, "world_space.mp4")
+        if os.path.exists(produced_video_path):
+            os.rename(produced_video_path, target_video_path)
+
+
+        from aitviewer.shaders import clear_shader_cache
+        clear_shader_cache()
+
+        run_vis2_on_video_cam(left_dict, right_dict, output_pth, K, image_names,
+                                R_w2c=R_w2c_sla_all[vis_start:vis_end],
+                                t_w2c=t_w2c_sla_all[vis_start:vis_end],
+                                interactive=False,
+                                target_size=(input_width, input_height))
+
+        produced_video_path = os.path.join(output_pth, "video_0.mp4")
+        target_video_path = os.path.join(output_pth, "camera_space.mp4")
+        if os.path.exists(produced_video_path):
+            os.rename(produced_video_path, target_video_path)
+
+        ensure_video_resolution(target_video_path, input_width, input_height)
+        final_video_pth = os.path.join(output_pth, "final_vis.mp4")
+
+        orig_video_for_concat = args.video_path
+        if os.path.isdir(args.video_path):
+            orig_video_for_concat = os.path.join(seq_folder, "input_from_frames.mp4")
+            if not os.path.exists(orig_video_for_concat):
+                build_video_from_frames(os.path.join(seq_folder, "extracted_images"), orig_video_for_concat)
+
+
+        # concatenate with the original video side by side (match both stream resolutions)
+        os.system(f"ffmpeg -y -i '{orig_video_for_concat}' -i '{target_video_path}' "
+                f"-filter_complex \"[0:v]scale={input_width}:{input_height}:flags=lanczos,setsar=1[orig];"
+                f"[1:v]scale={input_width}:{input_height}:flags=lanczos,setsar=1[vis];"
+                f"[orig][vis]hstack=inputs=2[v]\" "
+                f"-map '[v]' '{final_video_pth}'")
 
     # Suppress hands HAWOR never genuinely observed. pred_valid (2, T) is the
     # infiller's per-frame validity — now honest: a hand with no detections
@@ -313,8 +331,6 @@ if __name__ == '__main__':
     # finite-vertex check, and stash the mask for any consumer that wants it
     # explicitly. Applied here, after HAWOR's own debug videos are rendered, so
     # only the dumped hand_dict.pkl carries the masking. hand2idx: 1=right, 0=left.
-    valid_right = torch.from_numpy(pred_valid[1, vis_start:vis_end]).bool()
-    valid_left = torch.from_numpy(pred_valid[0, vis_start:vis_end]).bool()
     right_dict['vertices'][0, ~valid_right] = float('nan')
     left_dict['vertices'][0, ~valid_left] = float('nan')
     right_dict['valid'] = valid_right

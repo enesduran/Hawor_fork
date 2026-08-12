@@ -124,7 +124,16 @@ def detect_track_video(args):
         print("Skip extracting frames")
     else:
         if os.path.isdir(norm_file):
-            _normalize_image_folder_to_jpg(norm_file, img_folder)
+            src_images = _list_image_files(norm_file)
+            if (src_images and all(p.lower().endswith('.jpg') for p in src_images)
+                    and os.path.isdir(img_folder) and not os.path.islink(img_folder)
+                    and not os.listdir(img_folder)):
+                # Input is already a flat folder of jpgs — link it instead of
+                # duplicating every frame into extracted_images.
+                os.rmdir(img_folder)
+                os.symlink(os.path.relpath(norm_file, seq_folder), img_folder)
+            else:
+                _normalize_image_folder_to_jpg(norm_file, img_folder)
         else:
             _ = extract_frames(file, img_folder)
     imgfiles = natsorted(glob(f'{img_folder}/*.jpg'))

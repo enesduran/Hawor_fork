@@ -64,7 +64,17 @@ def hawor_motion_estimation(args, start_idx, end_idx, seq_folder):
     
     tid = np.array([tr for tr in tracks])
 
-    if os.path.exists(f'{seq_folder}/tracks_{start_idx}_{end_idx}/frame_chunks_all.npy'):
+    # model_masks (rendered hand silhouettes) are only consumed by DROID-SLAM;
+    # when demo.py will bypass SLAM (--cam_traj GT extrinsics or
+    # --static_camera) they are neither rendered nor saved below. The resume
+    # shortcut must therefore also require them when SLAM will run, or a
+    # folder first processed with GT extrinsics could never regenerate them.
+    need_slam_masks = (getattr(args, 'cam_traj', None) is None
+                       and not getattr(args, 'static_camera', False))
+
+    if os.path.exists(f'{seq_folder}/tracks_{start_idx}_{end_idx}/frame_chunks_all.npy') \
+            and (not need_slam_masks or
+                 os.path.exists(f'{seq_folder}/tracks_{start_idx}_{end_idx}/model_masks.npy')):
         print("skip hawor motion estimation")
         frame_chunks_all = joblib.load(f'{seq_folder}/tracks_{start_idx}_{end_idx}/frame_chunks_all.npy')
         return frame_chunks_all, img_focal
@@ -102,13 +112,20 @@ def hawor_motion_estimation(args, start_idx, end_idx, seq_folder):
     if cy is None or not np.isfinite(cy):
         cy = H / 2
     img_center = [float(cx), float(cy)]  # principal point in pixels
-    model_masks = np.zeros((len(imgfiles), H, W))
+    model_masks = np.zeros((len(imgfiles), H, W)) if need_slam_masks else None
 
-    bin_size = 128
+    # PyTorch3D's coarse rasterizer caps bins-per-axis below kMaxFacesPerBin (22):
+    # it requires 1 + (max_image_size - 1) // bin_size < 22. bin_size=128 only
+    # satisfies this up to ~2700px; full-res ARCTIC frames (2800px) overflow, so
+    # scale bin_size with the image so it always stays under the limit.
+    max_dim = max(img.shape[0], img.shape[1])
+    bin_size = max(128, int(np.ceil(max_dim / 18)))
     max_faces_per_bin = 20000
 
-    renderer = Renderer(img.shape[1], img.shape[0], img_focal, 'cuda', 
-                    bin_size=bin_size, max_faces_per_bin=max_faces_per_bin)
+    renderer = None
+    if need_slam_masks:
+        renderer = Renderer(img.shape[1], img.shape[0], img_focal, 'cuda',
+                            bin_size=bin_size, max_faces_per_bin=max_faces_per_bin)
     # get faces
     faces = get_mano_faces()
     faces_new = np.array([[92, 38, 234],
@@ -199,31 +216,33 @@ def hawor_motion_estimation(args, start_idx, end_idx, seq_folder):
                 json.dump(pred_dict, f, indent=1)
 
 
-            # get hand mask
-            data_out["init_root_orient"] = rotation_matrix_to_angle_axis(data_out["init_root_orient"])
-            data_out["init_hand_pose"] = rotation_matrix_to_angle_axis(data_out["init_hand_pose"])
-            if do_flip: # left
-                outputs = run_mano_left(data_out["init_trans"], data_out["init_root_orient"], data_out["init_hand_pose"], betas=data_out["init_betas"])
-            else: # right
-                outputs = run_mano(data_out["init_trans"], data_out["init_root_orient"], data_out["init_hand_pose"], betas=data_out["init_betas"])
-            
-            vertices = outputs["vertices"][0].cpu()  # (T, N, 3)
-            for img_i, _ in enumerate(img_ck):
-                if do_flip:
-                    faces = torch.from_numpy(faces_left).cuda()
-                else:
-                    faces = torch.from_numpy(faces_right).cuda()
-                cam_R = torch.eye(3).unsqueeze(0).cuda()
-                cam_T = torch.zeros(1, 3).cuda()
-                cameras, lights = renderer.create_camera_from_cv(cam_R, cam_T)
-                verts_color = torch.tensor([0, 0, 255, 255]) / 255
-                vertices_i = vertices[[img_i]]
-                rend, mask = renderer.render_multiple(vertices_i.unsqueeze(0).cuda(), faces, verts_color.unsqueeze(0).cuda(), cameras, lights)
-                
-                model_masks[frame_ck[img_i]] += mask
-                
-    model_masks = model_masks > 0 # bool
-    np.save(f'{seq_folder}/tracks_{start_idx}_{end_idx}/model_masks.npy', model_masks)
+            # get hand mask (only consumed by DROID-SLAM; see need_slam_masks)
+            if need_slam_masks:
+                data_out["init_root_orient"] = rotation_matrix_to_angle_axis(data_out["init_root_orient"])
+                data_out["init_hand_pose"] = rotation_matrix_to_angle_axis(data_out["init_hand_pose"])
+                if do_flip: # left
+                    outputs = run_mano_left(data_out["init_trans"], data_out["init_root_orient"], data_out["init_hand_pose"], betas=data_out["init_betas"])
+                else: # right
+                    outputs = run_mano(data_out["init_trans"], data_out["init_root_orient"], data_out["init_hand_pose"], betas=data_out["init_betas"])
+
+                vertices = outputs["vertices"][0].cpu()  # (T, N, 3)
+                for img_i, _ in enumerate(img_ck):
+                    if do_flip:
+                        faces = torch.from_numpy(faces_left).cuda()
+                    else:
+                        faces = torch.from_numpy(faces_right).cuda()
+                    cam_R = torch.eye(3).unsqueeze(0).cuda()
+                    cam_T = torch.zeros(1, 3).cuda()
+                    cameras, lights = renderer.create_camera_from_cv(cam_R, cam_T)
+                    verts_color = torch.tensor([0, 0, 255, 255]) / 255
+                    vertices_i = vertices[[img_i]]
+                    rend, mask = renderer.render_multiple(vertices_i.unsqueeze(0).cuda(), faces, verts_color.unsqueeze(0).cuda(), cameras, lights)
+
+                    model_masks[frame_ck[img_i]] += mask
+
+    if need_slam_masks:
+        model_masks = model_masks > 0 # bool
+        np.save(f'{seq_folder}/tracks_{start_idx}_{end_idx}/model_masks.npy', model_masks)
     joblib.dump(frame_chunks_all, f'{seq_folder}/tracks_{start_idx}_{end_idx}/frame_chunks_all.npy')
     return frame_chunks_all, img_focal
 
@@ -293,7 +312,24 @@ def hawor_infiller(args, start_idx, end_idx, frame_chunks_all, seq_folder):
     # runing fillingnet for this video
     frame_list = torch.tensor(list(range(pred_trans.size(1))))
     pred_valid = (pred_valid > 0).numpy()
+    # A hand with no genuine detections anywhere in the clip must not be
+    # infilled: the transformer would hallucinate it from the other hand's
+    # motion (e.g. HO-3D's left hand, which is never annotated). Freeze the
+    # pre-infill detection state so gap-filling only ever extends a hand that
+    # was actually seen.
+    ever_detected = pred_valid.any(axis=1)
+    # First/last genuinely detected frame per hand. Fills outside this span
+    # have an anchor on only one side, so the transformer extrapolates and
+    # regresses to a flat mean hand parked at the exit location; such frames
+    # must not be granted validity below.
+    det_spans = []
+    for h in range(2):
+        det_idxs = np.flatnonzero(pred_valid[h])
+        det_spans.append((det_idxs[0], det_idxs[-1]) if len(det_idxs) else (0, -1))
     for k, idx in enumerate([1, 0]):
+        if not ever_detected[idx]:
+            print(f"skip infiller on {idx2hand[idx]} hand (no detections)")
+            continue
         missing = ~pred_valid[idx]
 
         frame = frame_list[missing]
@@ -353,17 +389,29 @@ def hawor_infiller(args, start_idx, end_idx, frame_chunks_all, seq_folder):
 
             filling_output = filling_postprocess(output_ck, transform_w_canon)
 
-            # repalce the missing prediciton with infiller output
-            filling_seq['trans'][~seq_valid] = filling_output['trans'][~seq_valid]
-            filling_seq['rot'][~seq_valid] = filling_output['rot'][~seq_valid]
-            filling_seq['hand_pose'][~seq_valid] = filling_output['hand_pose'][~seq_valid]
-            filling_seq['betas'][~seq_valid] = filling_output['betas'][~seq_valid]
+            # repalce the missing prediciton with infiller output. Restrict the
+            # fill — and the validity it grants below — to hands that were
+            # genuinely detected. The infiller writes both hands jointly, so
+            # without this an undetected hand inside this window is hallucinated
+            # and then marked valid purely because the other hand was filled.
+            fill_mask = (~seq_valid) & ever_detected[:, None]
+            filling_seq['trans'][fill_mask] = filling_output['trans'][fill_mask]
+            filling_seq['rot'][fill_mask] = filling_output['rot'][fill_mask]
+            filling_seq['hand_pose'][fill_mask] = filling_output['hand_pose'][fill_mask]
+            filling_seq['betas'][fill_mask] = filling_output['betas'][fill_mask]
 
             pred_trans[:, filling_net_start:filling_net_end] = torch.from_numpy(filling_seq['trans'][:])
             pred_rot[:, filling_net_start:filling_net_end] = torch.from_numpy(filling_seq['rot'][:])
             pred_hand_pose[:, filling_net_start:filling_net_end] = torch.from_numpy(filling_seq['hand_pose'][:])
             pred_betas[:, filling_net_start:filling_net_end] = torch.from_numpy(filling_seq['betas'][:])
-            pred_valid[:, filling_net_start:filling_net_end] = 1
+            pred_valid[ever_detected, filling_net_start:filling_net_end] = 1
+    # Revoke validity outside each hand's detection span: only fills *between*
+    # detections (true interpolation) count as valid. demo.py NaNs the
+    # vertices of invalid frames, so leading/trailing hallucinations vanish.
+    for h in range(2):
+        span_lo, span_hi = det_spans[h]
+        pred_valid[h, :span_lo] = False
+        pred_valid[h, span_hi + 1:] = False
     save_path = os.path.join(seq_folder, "world_space_res.pth")
     joblib.dump([pred_trans, pred_rot, pred_hand_pose, pred_betas, pred_valid], save_path)
     return pred_trans, pred_rot, pred_hand_pose, pred_betas, pred_valid
