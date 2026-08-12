@@ -16,7 +16,7 @@ def coords_grid(ht, wd, **kwargs):
     return torch.stack([x, y], dim=-1)
 
 def iproj(disps, intrinsics, jacobian=False):
-    """ pinhole camera inverse projection """
+    """ pinhole camera inverse projection, opencv style (x right, y down) """
     ht, wd = disps.shape[2:]
     fx, fy, cx, cy = extract_intrinsics(intrinsics)
     
